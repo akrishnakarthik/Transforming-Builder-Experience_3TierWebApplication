@@ -1,0 +1,168 @@
+
+Name: ApplicationDeploymentPipeline
+SchemaVersion: "1.0"
+Triggers:
+  - Type: PUSH
+    Branches:
+      - main
+Actions:
+  Build:
+    Actions:
+      cdk_bootstrap:
+        Identifier: aws/cdk-bootstrap@v1
+        Inputs:
+          Sources:
+            - WorkflowSource
+        Configuration:
+          Region: ap-southeast-1
+        Environment:
+          Name: development
+          Connections:
+            - Name: "143261795639"
+              Role: CodeCatalystPreviewDevelopmentAdministrator-brg0qt
+      build_backend:
+        Identifier: aws/build@v1
+        Inputs:
+          Sources:
+            - WorkflowSource
+          Variables:
+            - Name: AWS_DEFAULT_REGION
+              Value: ap-southeast-1
+            - Name: CDK_DEFAULT_ACCOUNT
+              Value: "143261795639"
+            - Name: CDK_DEFAULT_REGION
+              Value: ap-southeast-1
+        Outputs:
+          AutoDiscoverReports:
+            Enabled: true
+            ReportNamePrefix: backend
+            IncludePaths:
+              - "**/*"
+            SuccessCriteria:
+              PassRate: 100
+              BranchCoverage: 50
+              LineCoverage: 70
+              Vulnerabilities:
+                Severity: CRITICAL
+          Artifacts:
+            - Name: backend
+              Files:
+                - "**/*"
+        Configuration:
+          Steps:
+            - Run: pip install -r requirements-dev.txt
+            - Run: PYTHONPATH=. coverage run --branch --omit "*/tests/**" -m pytest -k unit --junitxml=unitTests.xml
+            - Run: coverage xml
+        Environment:
+          Name: development
+          Connections:
+            - Name: "143261795639"
+              Role: CodeCatalystPreviewDevelopmentAdministrator-brg0qt
+  Deploy_Backend:
+    Identifier: aws/cdk-deploy@v1
+    DependsOn:
+      - Build
+    Inputs:
+      Sources:
+        - WorkflowSource
+      Variables:
+        - Name: AWS_DEFAULT_REGION
+          Value: ap-southeast-1
+        - Name: CDK_DEFAULT_ACCOUNT
+          Value: "143261795639"
+        - Name: CDK_DEFAULT_REGION
+          Value: ap-southeast-1
+    Configuration:
+      StackName: ibex-dev-mysfitAppStack
+      Region: ap-southeast-1
+      CfnOutputVariables: '["apiUrl"]'
+    Environment:
+      Name: development
+      Connections:
+        - Name: "143261795639"
+          Role: CodeCatalystPreviewDevelopmentAdministrator-brg0qt
+  Tests:
+    DependsOn:
+      - Deploy_Backend
+    Actions:
+      integration_tests:
+        Identifier: aws/managed-test@v1
+        Inputs:
+          Sources:
+            - WorkflowSource
+          Variables:
+            - Name: API_ENDPOINT
+              Value: ${Deploy_Backend.apiUrl}
+        Outputs:
+          AutoDiscoverReports:
+            Enabled: true
+            ReportNamePrefix: backend
+            IncludePaths:
+              - "**/*"
+            SuccessCriteria:
+              PassRate: 100
+          Artifacts:
+            - Name: integration_test_results
+              Files:
+                - "**/*"
+        Configuration:
+          Steps:
+            - Run: pip install -r requirements-dev.txt
+            - Run: pytest -k integ --junitxml=integTests.xml
+        Environment:
+          Name: development
+          Connections:
+            - Name: "143261795639"
+              Role: CodeCatalystPreviewDevelopmentAdministrator-brg0qt
+      build_and_test_frontend:
+        Identifier: aws/build@v1
+        Inputs:
+          Sources:
+            - WorkflowSource
+          Artifacts:
+            - backend
+          Variables:
+            - Name: VITE_API_ENDPOINT
+              Value: ${Deploy_Backend.apiUrl}
+        Outputs:
+          AutoDiscoverReports:
+            Enabled: true
+            ReportNamePrefix: frontend
+            IncludePaths:
+              - web/**/*
+            SuccessCriteria:
+              PassRate: 100
+              BranchCoverage: 50
+              LineCoverage: 70
+              Vulnerabilities:
+                Severity: CRITICAL
+          Artifacts:
+            - Name: frontEnd
+              Files:
+                - "**/*"
+        Configuration:
+          Steps:
+            - Run: cd web && npm install
+            - Run: CI=true npm run test:unit -- --reporter=junit --outputFile=unitTests.xml --coverage
+            - Run: npm run build-only
+        Environment:
+          Name: development
+          Connections:
+            - Name: "143261795639"
+              Role: CodeCatalystPreviewDevelopmentAdministrator-brg0qt
+  Deploy_Frontend:
+    Identifier: aws/cdk-deploy@v1
+    DependsOn:
+      - Tests
+    Inputs:
+      Artifacts:
+        - frontEnd
+    Configuration:
+      Region: ap-southeast-1
+      StackName: ibex-dev-mysfitWebStack
+      CfnOutputVariables: '["endpointUrl"]'
+    Environment:
+      Name: development
+      Connections:
+        - Name: "143261795639"
+          Role: CodeCatalystPreviewDevelopmentAdministrator-brg0qt
